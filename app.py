@@ -1,7 +1,7 @@
 """
-🚀 تطبيق رواد الأعمال المتقدم | بدون OTP ✅
+🚀 تطبيق رواد الأعمال | تسجيل فردي بدون OTP ✅
 ═══════════════════════════════════════════════════════════════
-تسجيل فوري + لغة + بلد + عملة + مالك/مشتري كامل
+كل شخص ينشئ حسابه الخاص - مالك/مشتري منفصل - بدون حساب جاهز
 """
 
 import streamlit as st
@@ -11,46 +11,42 @@ import hashlib
 from datetime import datetime, date
 
 # ========================================================
-# قاعدة البيانات المبسطة
 @st.cache_data(ttl=300)
 def init_db():
-    conn = sqlite3.connect('business_simple.db', check_same_thread=False)
+    conn = sqlite3.connect('business_personal.db', check_same_thread=False)
     c = conn.cursor()
     
     c.execute('''CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         email TEXT UNIQUE NOT NULL,
         password_hash TEXT NOT NULL,
-        role TEXT DEFAULT 'customer',
+        role TEXT CHECK(role IN ('owner', 'customer')) DEFAULT 'customer',
         country TEXT DEFAULT 'SA',
         currency TEXT DEFAULT 'SAR',
+        phone TEXT,
         created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )''')
     
     c.execute('''CREATE TABLE IF NOT EXISTS products (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_email TEXT,
         name TEXT, price REAL, stock INTEGER DEFAULT 10,
         image_url TEXT, category TEXT, currency TEXT DEFAULT 'SAR'
     )''')
     
     c.execute('''CREATE TABLE IF NOT EXISTS orders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_email TEXT, customer_name TEXT, phone TEXT, 
+        owner_email TEXT,
+        customer_email TEXT, customer_name TEXT, phone TEXT, 
         address TEXT, products TEXT, total REAL, status TEXT DEFAULT 'جديد'
     )''')
     
-    # حساب مالك افتراضي
-    default_hash = hashlib.sha256("admin123".encode()).hexdigest()
-    c.execute("INSERT OR IGNORE INTO users (email, password_hash, role) VALUES (?, ?, 'owner')", 
-             ('admin@business.com', default_hash))
-    
-    # منتجات تجريبية
-    products_data = [
-        ('لابتوب گيمنگ', 3500, 10, 'https://via.placeholder.com/300x200/667eea/fff?text=لابتوب', 'إلكترونيات'),
-        ('آيفون 15', 4500, 5, 'https://via.placeholder.com/300x200/764ba2/fff?text=آيفون', 'موبايلات'),
-        ('سماعات وايرلس', 250, 25, 'https://via.placeholder.com/300x200/11998e/fff?text=سماعات', 'إكسسوارات')
-    ]
-    c.executemany("INSERT OR IGNORE INTO products (name, price, stock, image_url, category) VALUES (?, ?, ?, ?, ?)", products_data)
+    # منتجات تجريبية عامة
+    c.executemany("INSERT OR IGNORE INTO products (owner_email, name, price, stock, image_url, category) VALUES (?, ?, ?, ?, ?, ?)", [
+        ('demo', 'لابتوب گيمنگ', 3500, 10, 'https://via.placeholder.com/300x200/667eea/fff?text=لابتوب', 'إلكترونيات'),
+        ('demo', 'آيفون 15', 4500, 5, 'https://via.placeholder.com/300x200/764ba2/fff?text=آيفون', 'موبايلات'),
+        ('demo', 'سماعات وايرلس', 250, 25, 'https://via.placeholder.com/300x200/11998e/fff?text=سماعات', 'إكسسوارات')
+    ])
     
     conn.commit()
     return conn
@@ -62,8 +58,7 @@ COUNTRIES = {
 }
 
 CURRENCIES = {
-    'SAR': '🇸🇦 ر.س', 'AED': '🇦🇪 درهم', 'EGP': '🇪🇬 ج.م', 
-    'USD': '🇺🇸 $', 'EUR': '🇪🇺 €'
+    'SAR': '🇸🇦 ر.س', 'AED': '🇦🇪 درهم', 'EGP': '🇪🇬 ج.م', 'USD': '🇺🇸 $'
 }
 
 # ========================================================
@@ -72,7 +67,7 @@ def hash_password(password):
 
 def safe_query(query, params=()):
     try:
-        conn = sqlite3.connect('business_simple.db')
+        conn = sqlite3.connect('business_personal.db')
         df = pd.read_sql_query(query, conn, params=params)
         conn.close()
         return df
@@ -80,9 +75,8 @@ def safe_query(query, params=()):
         return pd.DataFrame()
 
 # ========================================================
-st.set_page_config(page_title="🚀 متجر رواد الأعمال", page_icon="🚀", layout="wide")
+st.set_page_config(page_title="🚀 متجرك الخاص", page_icon="🚀", layout="wide")
 
-# CSS جميل
 st.markdown("""
 <style>
 .stApp { background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); }
@@ -90,7 +84,6 @@ st.markdown("""
     background: rgba(255,255,255,0.95); padding: 3rem; border-radius: 25px; 
     box-shadow: 0 20px 40px rgba(0,0,0,0.15); max-width: 600px; margin: 2rem auto; 
 }
-.product-card { background: white; padding: 1.5rem; border-radius: 15px; margin: 1rem 0; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
 </style>
 """, unsafe_allow_html=True)
 
@@ -99,199 +92,234 @@ if 'user' not in st.session_state:
     st.session_state.user = None
 
 # ========================================================
-# الصفحة الرئيسية - تسجيل/دخول مباشر بدون OTP
+# تسجيل/دخول - كل واحد حسابه الخاص ✅
 if st.session_state.user is None:
     st.markdown("""
     <div class='login-card'>
-        <h1 style='text-align: center; color: #667eea;'>🚀 متجر رواد الأعمال</h1>
-        <h3 style='text-align: center;'>ابدأ فوراً بدون تعقيد!</h3>
+        <h1 style='text-align: center;'>🚀 أنشئ متجرك الخاص الآن</h1>
+        <h3 style='text-align: center; color: #11998e;'>كل شخص حسابه الخاص!</h3>
     </div>
     """, unsafe_allow_html=True)
     
-    tab1, tab2 = st.tabs(["📝 إنشاء حساب", "🔑 تسجيل الدخول"])
+    tab1, tab2 = st.tabs(["👤 حساب جديد", "🔑 حساب موجود"])
     
-    # تبويب التسجيل - بدون OTP ✅
     with tab1:
-        st.subheader("👤 إنشاء حساب جديد (فوري)")
+        st.subheader("📝 أنشئ حسابك الخاص فوراً")
         
-        with st.form("register"):
+        with st.form("new_account"):
             col1, col2 = st.columns(2)
             with col1:
-                email = st.text_input("📧 البريد الإلكتروني *")
+                email = st.text_input("📧 بريدك الإلكتروني *")
                 phone = st.text_input("📱 رقم الجوال")
             with col2:
                 password = st.text_input("🔐 كلمة المرور *", type="password")
                 confirm_password = st.text_input("🔐 تأكيد كلمة المرور *", type="password")
             
-            col3, col4 = st.columns(2)
-            with col3:
-                country = st.selectbox("🌍 البلد", list(COUNTRIES.keys()), 
-                                     format_func=lambda x: COUNTRIES[x], index=0)
-            with col4:
-                currency = st.selectbox("💰 العملة", list(CURRENCIES.keys()), 
-                                      format_func=lambda x: CURRENCIES[x], index=0)
+            col1, col2 = st.columns(2)
+            with col1:
+                country = st.selectbox("🌍 بلدك", list(COUNTRIES.keys()), index=0,
+                                     format_func=lambda x: COUNTRIES[x])
+            with col2:
+                currency = st.selectbox("💰 عملتك", list(CURRENCIES.keys()), index=0,
+                                      format_func=lambda x: CURRENCIES[x])
             
-            role = st.radio("🎭 نوع الحساب", ["customer", "owner"], 
-                           format_func=lambda x: "مشتري" if x=="customer" else "مالك")
+            **role = st.radio("🎭 نوع حسابك", ["customer", "owner"], index=1,  # افتراضي مالك
+                            format_func=lambda x: "🛒 مشتري" if x=="customer" else "👑 مالك متجر")**
             
-            if st.form_submit_button("✅ إنشاء الحساب فوراً"):
-                if email and password and password == confirm_password:
-                    if safe_query("SELECT * FROM users WHERE email=?", (email,)).empty:
-                        # ✅ تسجيل فوري بدون OTP
-                        conn = sqlite3.connect('business_simple.db')
-                        c = conn.cursor()
-                        c.execute("INSERT INTO users (email, password_hash, role, country, currency) VALUES (?, ?, ?, ?, ?)",
-                                 (email, hash_password(password), role, country, currency))
-                        conn.commit()
-                        conn.close()
-                        
-                        st.session_state.user = {'email': email, 'role': role, 'country': country, 'currency': currency}
-                        st.success("🎉 تم إنشاء الحساب وتسجيل الدخول بنجاح!")
-                        st.balloons()
-                        st.rerun()
-                    else:
-                        st.error("❌ هذا الإيميل مسجل مسبقاً")
+            submitted = st.form_submit_button("🚀 أنشئ حسابي الآن", use_container_width=True)
+            
+            if submitted and email and password and password == confirm_password:
+                if safe_query("SELECT * FROM users WHERE email=?", (email,)).empty:
+                    # ✅ تسجيل فوري بدون أي تأخير
+                    conn = sqlite3.connect('business_personal.db')
+                    c = conn.cursor()
+                    c.execute("INSERT INTO users (email, password_hash, role, country, currency, phone) VALUES (?, ?, ?, ?, ?, ?)",
+                             (email, hash_password(password), role, country, currency, phone))
+                    conn.commit()
+                    conn.close()
+                    
+                    st.session_state.user = {
+                        'email': email, 'role': role, 
+                        'country': country, 'currency': currency, 'phone': phone
+                    }
+                    st.markdown("""
+                    <div style='background: linear-gradient(135deg, #11998e, #38ef7d); color: white; padding: 3rem; border-radius: 25px; text-align: center;'>
+                        <h2>🎉 حسابك جاهز فوراً!</h2>
+                        <h1>مرحباً {email}</h1>
+                        <p>ابدأ متجرك أو تسوق الآن ✨</p>
+                    </div>
+                    """.format(email=email), unsafe_allow_html=True)
+                    st.balloons()
+                    st.rerun()
                 else:
-                    st.error("❌ أدخل البيانات صحيحة")
+                    st.error("❌ هذا الإيميل مستخدم بالفعل")
+            elif submitted:
+                st.error("❌ تأكد من البيانات")
     
-    # تبويب تسجيل الدخول
     with tab2:
-        st.subheader("🔑 تسجيل الدخول السريع")
+        st.subheader("🔑 لديك حساب بالفعل؟")
         
         col1, col2 = st.columns(2)
         with col1:
-            login_email = st.text_input("📧 البريد الإلكتروني")
+            login_email = st.text_input("📧 بريدك الإلكتروني")
         with col2:
             login_password = st.text_input("🔐 كلمة المرور", type="password")
         
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("🚪 دخول", use_container_width=True):
-                users_df = safe_query("SELECT * FROM users")
-                for _, user in users_df.iterrows():
-                    if (user['email'] == login_email and 
-                        hash_password(login_password) == user['password_hash']):
-                        st.session_state.user = {
-                            'email': user['email'], 
-                            'role': user['role'],
-                            'country': user['country'], 
-                            'currency': user['currency']
-                        }
-                        st.success("✅ تم تسجيل الدخول بنجاح!")
-                        st.rerun()
-                        break
-                else:
-                    st.error("❌ بيانات خاطئة")
-        
-        with col2:
-            st.info("👑 **الحساب الافتراضي للمالك:**")
-            st.code("admin@business.com\nadmin123")
+        if st.button("🚪 دخول إلى حسابي", use_container_width=True):
+            users_df = safe_query("SELECT * FROM users")
+            for _, user_row in users_df.iterrows():
+                if (user_row['email'] == login_email and 
+                    hash_password(login_password) == user_row['password_hash']):
+                    st.session_state.user = {
+                        'email': user_row['email'],
+                        'role': user_row['role'],
+                        'country': user_row['country'],
+                        'currency': user_row['currency']
+                    }
+                    st.success(f"✅ مرحباً مرة أخرى {login_email}!")
+                    st.rerun()
+                    break
+            else:
+                st.error("❌ لا يوجد حساب بهذه البيانات")
     
     st.markdown("</div>", unsafe_allow_html=True)
 
 # ========================================================
-# بعد تسجيل الدخول
+# حساب مُسجل دخوله
 else:
-    # شريط التنقل
+    # شريط التحكم الشخصي
     col1, col2, col3 = st.columns([1, 3, 1])
     with col1:
-        st.markdown(f"**👋 مرحباً {st.session_state.user['email']}**")
+        st.markdown(f"**👋 {st.session_state.user['email']}**")
     with col2:
-        st.metric("🌍", COUNTRIES.get(st.session_state.user['country'], 'غير محدد'))
-        st.metric("💰", CURRENCIES.get(st.session_state.user['currency'], 'ر.س'))
+        st.metric("🏠", COUNTRIES[st.session_state.user['country']])
+        st.metric("💰", CURRENCIES[st.session_state.user['currency']])
     with col3:
-        if st.button("🔓 خروج"):
+        if st.button("🔓 خروج", use_container_width=True):
             st.session_state.user = None
             st.rerun()
     
-    # لوحة المالك
+    # ✅ لوحة المالك الخاصة
     if st.session_state.user['role'] == 'owner':
         st.markdown("""
-        <div style='background: linear-gradient(135deg, #11998e, #38ef7d); color: white; padding: 2rem; border-radius: 20px; text-align: center;'>
-            <h1>👑 لوحة تحكم المالك</h1>
+        <div style='background: linear-gradient(135deg, #11998e, #38ef7d); color: white; padding: 3rem; border-radius: 25px; text-align: center;'>
+            <h1>👑 متجرك الخاص {email}</h1>
+            <p>إدارة كاملة لمتجرك الشخصي</p>
         </div>
-        """, unsafe_allow_html=True)
+        """.format(email=st.session_state.user['email']), unsafe_allow_html=True)
         
-        tab1, tab2, tab3 = st.tabs(["📦 المنتجات", "🛒 الطلبات", "📊 الإحصائيات"])
+        tab1, tab2, tab3 = st.tabs(["📦 منتجاتك", "🛒 طلباتك", "📊 إحصائياتك"])
         
         with tab1:
-            st.header("➕ إدارة المنتجات")
-            with st.form("add_product"):
+            st.header("➕ أضف منتجات لمتجرك")
+            with st.form("owner_products"):
                 col1, col2 = st.columns(2)
                 with col1:
                     name = st.text_input("اسم المنتج")
-                    price = st.number_input("السعر", min_value=0.0)
+                    price = st.number_input("السعر", min_value=1.0)
                 with col2:
-                    stock = st.number_input("المخزون", min_value=0)
+                    stock = st.number_input("المخزون", min_value=1)
                     category = st.selectbox("الفئة", ["إلكترونيات", "ملابس", "أغذية"])
                 
-                if st.form_submit_button("➕ إضافة"):
-                    conn = sqlite3.connect('business_simple.db')
-                    conn.execute("INSERT INTO products (name, price, stock, category, currency) VALUES (?, ?, ?, ?, ?)",
-                               (name, price, stock, category, st.session_state.user['currency']))
+                if st.form_submit_button("➕ إضافة لمتجري"):
+                    conn = sqlite3.connect('business_personal.db')
+                    conn.execute("""INSERT INTO products (owner_email, name, price, stock, category, currency) 
+                                  VALUES (?, ?, ?, ?, ?, ?)""",
+                               (st.session_state.user['email'], name, price, stock, category, 
+                                st.session_state.user['currency']))
                     conn.commit()
-                    st.success("✅ تمت الإضافة!")
+                    st.success("✅ تمت الإضافة لمتجرك!")
             
-            products = safe_query("SELECT * FROM products ORDER BY id DESC LIMIT 10")
-            st.dataframe(products)
+            # منتجات هذا المالك
+            my_products = safe_query("SELECT * FROM products WHERE owner_email=?", 
+                                   (st.session_state.user['email'],))
+            if my_products.empty:
+                st.info("📦 لا توجد منتجات بعد - أضف الأول!")
+            else:
+                st.subheader("منتجات متجرك")
+                st.dataframe(my_products)
         
         with tab2:
-            orders = safe_query("SELECT * FROM orders ORDER BY id DESC")
-            st.dataframe(orders)
+            my_orders = safe_query("""SELECT * FROM orders WHERE owner_email=? ORDER BY id DESC""", 
+                                 (st.session_state.user['email'],))
+            if my_orders.empty:
+                st.info("📭 لا توجد طلبات بعد")
+            else:
+                st.dataframe(my_orders)
         
         with tab3:
-            st.metric("💰 إجمالي المبيعات", "125,430 ر.س")
-            st.metric("📦 الطلبات", "89 طلب")
+            st.metric("💰 مبيعات متجرك", "0 ر.س")
+            st.metric("📦 طلبات متجرك", "0 طلب")
     
-    # متجر المشتري
+    # ✅ متجر المشتري الخاص
     else:
         st.markdown("""
-        <div style='background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 2rem; border-radius: 20px; text-align: center;'>
-            <h1>🛒 المتجر</h1>
+        <div style='background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 3rem; border-radius: 25px; text-align: center;'>
+            <h1>🛒 تسوق من المتاجر</h1>
         </div>
         """, unsafe_allow_html=True)
         
-        # المنتجات
-        products = safe_query("SELECT * FROM products WHERE stock > 0")
-        if not products.empty:
+        # جميع المنتجات المتاحة من كل المالكين
+        all_products = safe_query("SELECT * FROM products WHERE stock > 0")
+        
+        if not all_products.empty:
+            st.subheader("🛍️ المنتجات المتاحة")
             cols = st.columns(3)
-            for i, (_, product) in enumerate(products.iterrows()):
+            for i, (_, product) in enumerate(all_products.iterrows()):
                 with cols[i % 3]:
                     st.markdown(f"""
-                    <div class='product-card'>
+                    <div style='background: white; padding: 1.5rem; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); text-align: center;'>
                         <img src='{product['image_url']}' style='width: 100%; height: 150px; object-fit: cover; border-radius: 10px;'>
-                        <h3>{product['name']}</h3>
-                        <h4 style='color: #11998e;'>{product['price']:.0f} {CURRENCIES.get(product['currency'], 'ر.س')}</h4>
+                        <h4>{product['name']}</h4>
+                        <h5 style='color: #11998e;'>{product['price']:.0f} {CURRENCIES.get(product['currency'], 'ر.س')}</h5>
                         <p>المخزون: {product['stock']}</p>
+                        <small>👑 مالك: {product['owner_email']}</small>
                     </div>
                     """, unsafe_allow_html=True)
             
-            # الطلب
-            with st.form("order"):
-                st.markdown("<div class='login-card'>", unsafe_allow_html=True)
-                customer_name = st.text_input("الاسم *")
-                phone = st.text_input("الهاتف *")
-                address = st.text_area("العنوان *")
-                products_list = st.multiselect("المنتجات", products['name'].tolist())
+            # طلب من أي متجر
+            with st.form("buy_form"):
+                st.markdown("<div style='background: white; padding: 2rem; border-radius: 20px;'>", unsafe_allow_html=True)
+                st.subheader("📋 اطلب الآن")
                 
-                if st.form_submit_button("✅ طلب الآن"):
-                    if customer_name and phone and address and products_list:
-                        conn = sqlite3.connect('business_simple.db')
-                        conn.execute("INSERT INTO orders (user_email, customer_name, phone, address, products) VALUES (?, ?, ?, ?, ?)",
-                                   (st.session_state.user['email'], customer_name, phone, address, ";".join(products_list)))
-                        conn.commit()
-                        st.success("✅ تم تسجيل الطلب!")
-                        st.balloons()
-                    else:
-                        st.error("❌ املأ جميع الحقول")
+                customer_name = st.text_input("الاسم الكامل *")
+                phone = st.text_input("رقم الجوال *")
+                address = st.text_area("العنوان *")
+                
+                selected_products = st.multiselect("المنتجات المطلوبة", all_products['name'].tolist())
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.form_submit_button("✅ اطلب الآن", use_container_width=True):
+                        if customer_name and phone and address and selected_products:
+                            # البحث عن مالك المنتجات
+                            owners = set()
+                            for prod_name in selected_products:
+                                owner = all_products[all_products['name'] == prod_name]['owner_email'].iloc[0]
+                                owners.add(owner)
+                            
+                            # حفظ الطلب لكل مالك
+                            conn = sqlite3.connect('business_personal.db')
+                            for owner_email in owners:
+                                conn.execute("""INSERT INTO orders (owner_email, customer_email, customer_name, phone, address, products) 
+                                              VALUES (?, ?, ?, ?, ?, ?)""",
+                                           (owner_email, st.session_state.user['email'], customer_name, 
+                                            phone, address, ";".join(selected_products)))
+                            conn.commit()
+                            conn.close()
+                            
+                            st.success("✅ تم إرسال طلبك لأصحاب المتاجر!")
+                            st.balloons()
+                        else:
+                            st.error("❌ املأ جميع الحقول")
                 st.markdown("</div>", unsafe_allow_html=True)
         else:
-            st.warning("📦 لا يوجد منتجات متاحة")
+            st.info("📦 لا توجد منتجات متاحة حالياً")
 
 # Footer
 st.markdown("""
-<div style='text-align: center; padding: 2rem; color: #666;'>
-    <h4>✅ تطبيق متجر كامل - بدون OTP - تسجيل فوري</h4>
-    <p><strong>الحساب الجاهز:</strong> admin@business.com | admin123</p>
+<div style='text-align: center; padding: 2rem; color: #666; margin-top: 3rem;'>
+    <h4>✅ كل شخص متجره الخاص - تسجيل فردي بدون OTP</h4>
+    <p>أنشئ حسابك الآن وابدأ متجرك أو تسوق من المتاجر ✨</p>
 </div>
 """, unsafe_allow_html=True)
